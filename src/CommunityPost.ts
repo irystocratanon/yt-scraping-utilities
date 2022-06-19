@@ -7,6 +7,8 @@ import {
     getThumbnail
 } from "./util";
 
+import {subSeconds,subMinutes,subHours,subDays,subWeeks,subMonths,subYears} from "date-fns"
+
 export enum AttachmentType {
     Image = "IMAGE",
     Poll = "POLL",
@@ -28,6 +30,8 @@ export interface CommunityPost {
     content?: {text: string, url?: string}[];
 
     attachmentType: AttachmentType;
+
+	approximatePostDate: Date;
 
     /* Only present if attachmentType is `IMAGE` */
     images?: string[];
@@ -175,7 +179,50 @@ export function extractPost(rawPost: Record<string, any>): CommunityPost {
         }
     )
 
-    const post: CommunityPost = {id, attachmentType};
+	// YouTube Community posts do not reveal the actual post date so we need to approximate it from the friendly text they give us
+	let approximatePostDate = new Date()
+
+    const post: CommunityPost = {id, attachmentType, approximatePostDate};
+
+	let postDate = rawPost.publishedTimeText.runs[0].text.split(' ')
+
+	let postDateN = Number.parseInt(postDate[0])
+
+	//console.log(postDate)
+	//console.log(postDateN)
+
+	switch (postDate[1]) {
+		case 'second':
+		case 'seconds':
+			approximatePostDate = subSeconds(approximatePostDate, postDateN)
+			break
+		case 'minute':
+		case 'minutes':
+			approximatePostDate = subMinutes(approximatePostDate, postDateN)
+			break
+		case 'hour':
+		case 'hours':
+			approximatePostDate = subHours(approximatePostDate, postDateN)
+			break
+		case 'day':
+		case 'days':
+			approximatePostDate = subDays(approximatePostDate, postDateN)
+			break
+		case 'week':
+		case 'weeks':
+			approximatePostDate = subWeeks(approximatePostDate, postDateN)
+			break
+		case 'month':
+		case 'months':
+			approximatePostDate = subMonths(approximatePostDate, postDateN)
+			break
+		case 'year':
+		case 'years':
+			approximatePostDate = subYears(approximatePostDate, postDateN)
+			break
+		default:
+			break
+	}
     
     // avoid ugly {content: undefined}s
     if (content) post.content = content;
@@ -183,6 +230,7 @@ export function extractPost(rawPost: Record<string, any>): CommunityPost {
     if (choices) post.choices = choices;
     if (video) post.video = video;
     if (playlist) post.playlist = playlist; 
+	if (approximatePostDate) post.approximatePostDate = approximatePostDate
 
     if (originalPost) post.sharedPost = extractPost(originalPost.backstagePostRenderer);
 
