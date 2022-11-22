@@ -6,6 +6,8 @@ import {
     getTextOrMergedRuns
 } from "./util";
 
+import {subSeconds,subMinutes,subHours,subDays,subWeeks,subMonths,subYears} from "date-fns"
+
 export enum AttachmentType {
     Image = "Image",
     Poll = "Poll",
@@ -25,6 +27,7 @@ interface BaseCommunityPost {
     id: string;
     content?: {text: string, url?: string}[];
     attachmentType: AttachmentType;
+    approximatePostDate: Date;
 }
 
 export interface TextOnlyCommunityPost extends BaseCommunityPost {
@@ -86,6 +89,45 @@ export function extractPost(rawPost: Record<string, any>): CommunityPost {
     // normal posts store text in `contentText`, quote posts store them in `content`.
     const {postId: id, contentText, backstageAttachment: attachment, originalPost, content: sharedPostContent} = rawPost;
 
+    let approximatePostDate = new Date();
+    let postDate = rawPost.publishedTimeText.runs[0].text.split(' ');
+    let postDateN = Number.parseInt(postDate[0])
+
+
+	switch (postDate[1]) {
+		case 'second':
+		case 'seconds':
+			approximatePostDate = subSeconds(approximatePostDate, postDateN)
+			break
+		case 'minute':
+		case 'minutes':
+			approximatePostDate = subMinutes(approximatePostDate, postDateN)
+			break
+		case 'hour':
+		case 'hours':
+			approximatePostDate = subHours(approximatePostDate, postDateN)
+			break
+		case 'day':
+		case 'days':
+			approximatePostDate = subDays(approximatePostDate, postDateN)
+			break
+		case 'week':
+		case 'weeks':
+			approximatePostDate = subWeeks(approximatePostDate, postDateN)
+			break
+		case 'month':
+		case 'months':
+			approximatePostDate = subMonths(approximatePostDate, postDateN)
+			break
+		case 'year':
+		case 'years':
+			approximatePostDate = subYears(approximatePostDate, postDateN)
+			break
+		default:
+			break
+	}
+
+
     let attachmentType: AttachmentType | "INVALID";
     switch (true) {
         case originalPost?.backstagePostRenderer !== undefined: attachmentType = AttachmentType.SharedPost; break;
@@ -137,7 +179,7 @@ export function extractPost(rawPost: Record<string, any>): CommunityPost {
         );
     })();
 
-    const post: BaseCommunityPost & Record<string, any> = {id, content, attachmentType};
+    const post: BaseCommunityPost & Record<string, any> = {id, content, attachmentType, approximatePostDate};
 
 
     const images = (() => {
