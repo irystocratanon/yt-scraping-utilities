@@ -1,7 +1,7 @@
 import { ytInitialPlayerResponse } from "./youtube-types";
 export declare enum Playability {
-    OK = "OK",
-    Unplayable = "UNPLAYABLE"
+    Ok = "Ok",
+    Unplayable = "Unplayable"
 }
 export interface VideoFormat {
     url: string;
@@ -66,7 +66,7 @@ export interface PlayerInfo {
 }
 /**
  * Extracts info from the player renderer from a `/watch` page or a `youtu.be`.
- * @param source - either parsed `ytPlayerInitialResponse` (via `parseRawData`) or page source string from a player page.
+ * @param source either parsed `ytPlayerInitialResponse` (via `parseRawData`) or page source string from a player page.
  */
 export declare function extractPlayerInfo(source: ytInitialPlayerResponse): PlayerInfo;
 export declare function extractPlayerInfo(source: string): PlayerInfo;

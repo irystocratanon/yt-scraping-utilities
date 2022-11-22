@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getThumbnail = exports.tryParseDate = exports.isValidDate = exports.mergeRuns = exports.sanitizeUrl = exports.getLastItem = exports.findValuesByKeys = exports.findActiveTab = exports.parseRawData = exports.playerResponseRe = exports.initialDataRe = void 0;
+exports.transformYtInitialData = exports.getTextOrMergedRuns = exports.getThumbnail = exports.tryParseDate = exports.isValidDate = exports.mergeRuns = exports.sanitizeUrl = exports.getLastItem = exports.findValuesByKeys = exports.findActiveTab = exports.parseRawData = exports.playerResponseRe = exports.initialDataRe = void 0;
 /**
  * Tries to match ytInitialData variable on a YouTube page.
  */
@@ -11,9 +11,6 @@ exports.initialDataRe = /(?<=var ytInitialData *\= *)\{.*?}(?=\;)(?<![A-z<>])/;
 exports.playerResponseRe = /(?<=var ytInitialPlayerResponse *\= *)\{.*?}(?=\;)(?<![A-z<>])/;
 /**
  * Extract raw full objects (`ytInitialData` and `ytInitialPlayerResponse`) from a YT page string.
- * @param options.source - the YouTube page body as string.
- * @param options.ytInitialData - whether or not to parse and return ytInitialData.
- * @param options.ytInitialPlayerResponse - whether or not to parse and return ytInitialPlayerResponse (only present on /watch and youtu.be pages).
  */
 function parseRawData(options) {
     const { source, ytInitialData: extractInitialData, ytInitialPlayerResponse: extractPlayerResponse } = options;
@@ -28,7 +25,7 @@ function parseRawData(options) {
     }
     if (extractPlayerResponse) {
         const match = exports.playerResponseRe.exec(source);
-        match && (ret.ytInititalPlayerRespone = JSON.parse(match[0]));
+        match && (ret.ytInitialPlayerResponse = JSON.parse(match[0]));
     }
     return ret;
 }
@@ -81,7 +78,7 @@ const sanitizeUrl = (url, offset = 0) => {
 };
 exports.sanitizeUrl = sanitizeUrl;
 /**
- * Merges runs Arrays into a single text string.
+ * Merges {@linkcode Run} Arrays into a single text string.
  */
 const mergeRuns = (runs) => runs.map(r => r.text).join("");
 exports.mergeRuns = mergeRuns;
@@ -96,3 +93,15 @@ const tryParseDate = (timestamp) => {
 exports.tryParseDate = tryParseDate;
 const getThumbnail = (thumbnails) => (0, exports.sanitizeUrl)((0, exports.getLastItem)(thumbnails).url);
 exports.getThumbnail = getThumbnail;
+const getTextOrMergedRuns = (source) => source.simpleText ?? (0, exports.mergeRuns)(source.runs);
+exports.getTextOrMergedRuns = getTextOrMergedRuns;
+/**
+ * Utility function used to search ytInitialData for renderers, and transform those into more easily usable types.
+ */
+function transformYtInitialData(source, searchKeys, transformer) {
+    if (typeof source !== "object")
+        source = parseRawData({ ytInitialData: true, source }).ytInitialData;
+    const items = (0, exports.findValuesByKeys)(source, searchKeys);
+    return items.map(transformer);
+}
+exports.transformYtInitialData = transformYtInitialData;

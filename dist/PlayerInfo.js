@@ -4,11 +4,15 @@ exports.extractPlayerInfo = exports.Playability = void 0;
 const util_1 = require("./util");
 var Playability;
 (function (Playability) {
-    Playability["OK"] = "OK";
-    Playability["Unplayable"] = "UNPLAYABLE";
+    Playability["Ok"] = "Ok";
+    Playability["Unplayable"] = "Unplayable";
 })(Playability = exports.Playability || (exports.Playability = {}));
+const statusLookup = {
+    OK: Playability.Ok,
+    UNPLAYABLE: Playability.Unplayable
+};
 function extractPlayerInfo(source) {
-    const playerResponse = typeof source === "string" ? (0, util_1.parseRawData)({ source, ytInitialPlayerResponse: true }).ytInititalPlayerRespone : source;
+    const playerResponse = typeof source === "string" ? (0, util_1.parseRawData)({ source, ytInitialPlayerResponse: true }).ytInitialPlayerResponse : source;
     if (!playerResponse)
         throw new TypeError(`No player response in provided source! Make sure the source is from /watch or a youtu.be link!`);
     const { playabilityStatus, streamingData, videoDetails, microformat } = playerResponse;
@@ -20,21 +24,21 @@ function extractPlayerInfo(source) {
         videoId,
         channelId,
         channelName,
-        description: description?.simpleText || '',
+        description: description.simpleText,
         thumbnail,
         viewers,
         ratable,
         title: rawTitle.simpleText,
         length,
         keywords,
-        playability: status,
+        playability: statusLookup[status],
         unlisted,
         familySafe,
-        membersOnly: false,
+        membersOnly: errorScreen?.playerLegacyDesktopYpcOfferRenderer.offerId === "sponsors_only_video",
         embeddable,
         isStream: isLiveContent,
         live: false,
-        hasEnded: false
+        hasEnded: false,
     };
     if (streamingData) {
         const { formats } = streamingData;
@@ -54,14 +58,6 @@ function extractPlayerInfo(source) {
                     channels: format.channels
                 }
             }));
-        }
-    }
-    if (errorScreen?.playerLegacyDesktopYpcOfferRenderer) {
-        const { playerLegacyDesktopYpcOfferRenderer: offer } = errorScreen;
-        switch (offer.offerId) {
-            case "sponsors_only_video":
-                playerInfo.membersOnly = true;
-                break;
         }
     }
     if (liveBroadcastDetails) {

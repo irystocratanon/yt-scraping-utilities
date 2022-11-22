@@ -5,11 +5,12 @@ const util_1 = require("./util");
 const date_fns_1 = require("date-fns");
 var AttachmentType;
 (function (AttachmentType) {
-    AttachmentType["Image"] = "IMAGE";
-    AttachmentType["Poll"] = "POLL";
-    AttachmentType["Video"] = "VIDEO";
-    AttachmentType["Playlist"] = "PLAYLIST";
-    AttachmentType["None"] = "NONE";
+    AttachmentType["Image"] = "Image";
+    AttachmentType["Poll"] = "Poll";
+    AttachmentType["Video"] = "Video";
+    AttachmentType["Playlist"] = "Playlist";
+    AttachmentType["SharedPost"] = "SharedPost";
+    AttachmentType["None"] = "None";
 })(AttachmentType = exports.AttachmentType || (exports.AttachmentType = {}));
 // NOTE: the order here is important, otherwise the sharedPostRenderer and its original post would appear in separate results.
 const communityPostKeys = ["sharedPostRenderer", "backstagePostRenderer"];
@@ -17,9 +18,48 @@ const communityPostKeys = ["sharedPostRenderer", "backstagePostRenderer"];
  * Extracts a simplified community post from a `backstagePostRenderer` or a `sharedPostRenderer`.
  */
 function extractPost(rawPost) {
-    const { postId: id, contentText: text, backstageAttachment: attachment, originalPost } = rawPost;
+    // normal posts store text in `contentText`, quote posts store them in `content`.
+    const { postId: id, contentText, backstageAttachment: attachment, originalPost, content: sharedPostContent } = rawPost;
+    let approximatePostDate = new Date();
+    let postDate = rawPost.publishedTimeText.runs[0].text.split(' ');
+    let postDateN = Number.parseInt(postDate[0]);
+    switch (postDate[1]) {
+        case 'second':
+        case 'seconds':
+            approximatePostDate = (0, date_fns_1.subSeconds)(approximatePostDate, postDateN);
+            break;
+        case 'minute':
+        case 'minutes':
+            approximatePostDate = (0, date_fns_1.subMinutes)(approximatePostDate, postDateN);
+            break;
+        case 'hour':
+        case 'hours':
+            approximatePostDate = (0, date_fns_1.subHours)(approximatePostDate, postDateN);
+            break;
+        case 'day':
+        case 'days':
+            approximatePostDate = (0, date_fns_1.subDays)(approximatePostDate, postDateN);
+            break;
+        case 'week':
+        case 'weeks':
+            approximatePostDate = (0, date_fns_1.subWeeks)(approximatePostDate, postDateN);
+            break;
+        case 'month':
+        case 'months':
+            approximatePostDate = (0, date_fns_1.subMonths)(approximatePostDate, postDateN);
+            break;
+        case 'year':
+        case 'years':
+            approximatePostDate = (0, date_fns_1.subYears)(approximatePostDate, postDateN);
+            break;
+        default:
+            break;
+    }
     let attachmentType;
     switch (true) {
+        case originalPost?.backstagePostRenderer !== undefined:
+            attachmentType = AttachmentType.SharedPost;
+            break;
         case !attachment:
             attachmentType = AttachmentType.None;
             break;
@@ -40,6 +80,36 @@ function extractPost(rawPost) {
     if (attachmentType === "INVALID") {
         throw new Error(`Could not resolve attachmentType in ${JSON.stringify(attachment)}! Please open an issue with this error!`);
     }
+    const content = (() => {
+        const runMapper = (run) => {
+            const { text, navigationEndpoint } = run;
+            if (navigationEndpoint) {
+                const { commandMetadata } = navigationEndpoint;
+                let url;
+                const { url: parsedUrl } = commandMetadata.webCommandMetadata;
+                const initialUrl = new URL(commandMetadata.webCommandMetadata.url, parsedUrl.startsWith("http") ? undefined : "https://youtube.com/");
+                // q parameter is the redirect target for /redirect links
+                if (initialUrl.searchParams.has("q")) {
+                    url = initialUrl.searchParams.get("q");
+                    // if &q is not present, it's a YouTube-internal link.
+                }
+                else {
+                    url = initialUrl.toString();
+                }
+                if (!url)
+                    throw new Error(`Could not find URL in ${JSON.stringify(navigationEndpoint)}! Please open an issue with this error message!`);
+                return {
+                    text,
+                    url
+                };
+            }
+            return { text };
+        };
+        // this is a mess.
+        return (contentText?.runs?.map(runMapper) ?? (contentText?.simpleText ? { text: contentText.simpleText } : undefined) ??
+            sharedPostContent?.runs?.map(runMapper) ?? (sharedPostContent?.simpleText ? { text: sharedPostContent.simpleText } : undefined));
+    })();
+    const post = { id, content, attachmentType, approximatePostDate };
     const images = (() => {
         if (attachmentType !== AttachmentType.Image)
             return;
@@ -60,7 +130,6 @@ function extractPost(rawPost) {
         if (attachmentType !== AttachmentType.Poll)
             return;
         const { choices: rawChoices } = attachment.pollRenderer;
-        // TODO: proper YouTube typings for easier development because ytInitialData is a mess.
         return rawChoices.map((rawChoice) => {
             const text = (0, util_1.mergeRuns)(rawChoice.text.runs);
             const choice = { text };
@@ -97,93 +166,22 @@ function extractPost(rawPost) {
             id, title, thumbail
         };
     })();
-    const content = text?.runs && text.runs.map((run) => {
-        const { text, navigationEndpoint } = run;
-        if (navigationEndpoint) {
-            const { commandMetadata } = navigationEndpoint;
-            let url;
-            const { url: parsedUrl } = commandMetadata.webCommandMetadata;
-            const initialUrl = new URL(commandMetadata.webCommandMetadata.url, parsedUrl.startsWith("http") ? undefined : "https://youtube.com/");
-            // q parameter is the redirect target for /redirect links
-            if (initialUrl.searchParams.has("q")) {
-                url = initialUrl.searchParams.get("q");
-                // if &q is not present, it's a YouTube-internal link.
-            }
-            else {
-                url = initialUrl.toString();
-            }
-            if (!url)
-                throw new Error(`Could not find URL in ${JSON.stringify(navigationEndpoint)}! Please open an issue with this error message!`);
-            return {
-                text,
-                url
-            };
-        }
-        return { text };
-    });
-    // YouTube Community posts do not reveal the actual post date so we need to approximate it from the friendly text they give us
-    let approximatePostDate = new Date();
-    const post = { id, attachmentType, approximatePostDate };
-    let postDate = rawPost.publishedTimeText.runs[0].text.split(' ');
-    let postDateN = Number.parseInt(postDate[0]);
-    //console.log(postDate)
-    //console.log(postDateN)
-    switch (postDate[1]) {
-        case 'second':
-        case 'seconds':
-            approximatePostDate = (0, date_fns_1.subSeconds)(approximatePostDate, postDateN);
-            break;
-        case 'minute':
-        case 'minutes':
-            approximatePostDate = (0, date_fns_1.subMinutes)(approximatePostDate, postDateN);
-            break;
-        case 'hour':
-        case 'hours':
-            approximatePostDate = (0, date_fns_1.subHours)(approximatePostDate, postDateN);
-            break;
-        case 'day':
-        case 'days':
-            approximatePostDate = (0, date_fns_1.subDays)(approximatePostDate, postDateN);
-            break;
-        case 'week':
-        case 'weeks':
-            approximatePostDate = (0, date_fns_1.subWeeks)(approximatePostDate, postDateN);
-            break;
-        case 'month':
-        case 'months':
-            approximatePostDate = (0, date_fns_1.subMonths)(approximatePostDate, postDateN);
-            break;
-        case 'year':
-        case 'years':
-            approximatePostDate = (0, date_fns_1.subYears)(approximatePostDate, postDateN);
-            break;
-        default:
-            break;
-    }
     // avoid ugly {content: undefined}s
-    if (content)
-        post.content = content;
-    if (images)
+    if (post.attachmentType === AttachmentType.Image)
         post.images = images;
-    if (choices)
+    else if (post.attachmentType === AttachmentType.Poll)
         post.choices = choices;
-    if (video)
+    else if (post.attachmentType === AttachmentType.Video)
         post.video = video;
-    if (playlist)
+    else if (post.attachmentType === AttachmentType.Playlist)
         post.playlist = playlist;
-    if (approximatePostDate)
-        post.approximatePostDate = approximatePostDate;
-    if (originalPost)
+    else if (post.attachmentType === AttachmentType.SharedPost)
         post.sharedPost = extractPost(originalPost.backstagePostRenderer);
+    // this is really inelegant.
     return post;
 }
 exports.extractPost = extractPost;
 function extractCommunityPosts(source) {
-    const ytInitialData = typeof source === "string" ? (0, util_1.parseRawData)({ source, ytInitialData: true }).ytInitialData : source;
-    if (!ytInitialData)
-        throw new TypeError(`No YT initial data in provided source.`);
-    // Slight optimization to skip unused tabs and meta tags.
-    const rawPosts = (0, util_1.findValuesByKeys)((0, util_1.findActiveTab)(ytInitialData), communityPostKeys);
-    return rawPosts.map(post => extractPost(post));
+    return (0, util_1.transformYtInitialData)(source, communityPostKeys, extractPost);
 }
 exports.extractCommunityPosts = extractCommunityPosts;

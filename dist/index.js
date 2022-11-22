@@ -18,6 +18,8 @@ exports.findActiveTab = exports.parseRawData = exports.ytInitialPlayerResponseRe
 __exportStar(require("./ChannelInfo"), exports);
 __exportStar(require("./CommunityPost"), exports);
 __exportStar(require("./PlayerInfo"), exports);
+__exportStar(require("./GridVideoRenderer"), exports);
+__exportStar(require("./ReelItemRenderer"), exports);
 var util_1 = require("./util");
 Object.defineProperty(exports, "ytInitialDataRegex", { enumerable: true, get: function () { return util_1.initialDataRe; } });
 Object.defineProperty(exports, "ytInitialPlayerResponseRegex", { enumerable: true, get: function () { return util_1.playerResponseRe; } });
