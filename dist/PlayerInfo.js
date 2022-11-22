@@ -20,7 +20,7 @@ function extractPlayerInfo(source) {
         videoId,
         channelId,
         channelName,
-        description: description.simpleText,
+        description: description?.simpleText || '',
         thumbnail,
         viewers,
         ratable,

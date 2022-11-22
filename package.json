@@ -1,6 +1,6 @@
 {
   "name": "yt-scraping-utilities",
-  "version": "0.1.3",
+  "version": "0.1.7",
   "description": "",
   "repository": {
     "type": "git",
@@ -10,7 +10,7 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "prepublish": "tsc",
-    "publish": "np",
+    "publish:np": "np",
     "test": "npx mocha"
   },
   "keywords": [

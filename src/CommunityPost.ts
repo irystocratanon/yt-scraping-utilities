@@ -1,20 +1,18 @@
 import type { ytInitialData } from "./youtube-types";
 import { 
-    findValuesByKeys,  
-    parseRawData, 
     mergeRuns, 
-    findActiveTab, 
-    getThumbnail
+    getThumbnail,
+    transformYtInitialData,
+    getTextOrMergedRuns
 } from "./util";
 
-import {subSeconds,subMinutes,subHours,subDays,subWeeks,subMonths,subYears} from "date-fns"
-
 export enum AttachmentType {
-    Image = "IMAGE",
-    Poll = "POLL",
-    Video = "VIDEO",
-    Playlist = "PLAYLIST",
-    None = "NONE",
+    Image = "Image",
+    Poll = "Poll",
+    Video = "Video",
+    Playlist = "Playlist",
+    SharedPost = "SharedPost",
+    None = "None",
 }
 
 export interface PollChoice {
@@ -22,33 +20,42 @@ export interface PollChoice {
     imageUrl?: string;
 }
 
-export interface CommunityPost {
+
+interface BaseCommunityPost {
     id: string;
-    /**
-     * To display just the text content of a post, use `content.map(({text}) => text).join("");`.
-     */
     content?: {text: string, url?: string}[];
-
     attachmentType: AttachmentType;
+}
 
-	approximatePostDate: Date;
+export interface TextOnlyCommunityPost extends BaseCommunityPost {
+    attachmentType: AttachmentType.None;
+    content: {text: string, url?: string}[];
+}
 
-    /* Only present if attachmentType is `IMAGE` */
-    images?: string[];
+export interface ImageCommunityPost extends BaseCommunityPost {
+    attachmentType: AttachmentType.Image;
+    images: string[];
+}
 
-    /* Only present if attachmentType is `POLL` */
-    choices?: PollChoice[];
+export interface PollCommunityPost extends BaseCommunityPost {
+    attachmentType: AttachmentType.Poll;
+    choices: PollChoice[];
+}
 
-    /* Only present if attachmentType is `VIDEO` */
-    video?: {
+export interface VideoCommunityPost extends BaseCommunityPost {
+    attachmentType: AttachmentType.Video;
+    video: {
         id?: string; // TODO: test for invalid cases 
         title: string;
         descriptionSnippet?: string;
         thumbnail: string;
         membersOnly: boolean;
     }
+}
 
-    playlist?: {
+export interface PlaylistCommunityPost extends BaseCommunityPost {
+    attachmentType: AttachmentType.Playlist;
+    playlist: {
         /**
          * If ID is undefined, the playlist is no longer available.
          */
@@ -56,9 +63,18 @@ export interface CommunityPost {
         title: string;
         thumbail: string;
     }
-
-    sharedPost?: CommunityPost;
 }
+
+
+export interface SharedPostCommunityPost extends BaseCommunityPost {
+    attachmentType: AttachmentType.SharedPost;
+    sharedPost: CommunityPost;
+}
+
+/**
+ * Represents a community post. Type can be narrowed by checking the post's {@linkcode AttachmentType}.
+ */
+export type CommunityPost = SharedPostCommunityPost | ImageCommunityPost | PollCommunityPost | VideoCommunityPost | PlaylistCommunityPost | TextOnlyCommunityPost;
 
 // NOTE: the order here is important, otherwise the sharedPostRenderer and its original post would appear in separate results.
 const communityPostKeys = ["sharedPostRenderer", "backstagePostRenderer"];
@@ -67,10 +83,12 @@ const communityPostKeys = ["sharedPostRenderer", "backstagePostRenderer"];
  * Extracts a simplified community post from a `backstagePostRenderer` or a `sharedPostRenderer`.
  */
 export function extractPost(rawPost: Record<string, any>): CommunityPost {
-    const {postId: id, contentText: text, backstageAttachment: attachment, originalPost} = rawPost;
+    // normal posts store text in `contentText`, quote posts store them in `content`.
+    const {postId: id, contentText, backstageAttachment: attachment, originalPost, content: sharedPostContent} = rawPost;
 
     let attachmentType: AttachmentType | "INVALID";
     switch (true) {
+        case originalPost?.backstagePostRenderer !== undefined: attachmentType = AttachmentType.SharedPost; break;
         case !attachment: attachmentType = AttachmentType.None; break;
         case attachment.backstageImageRenderer != undefined || attachment.postMultiImageRenderer != undefined: attachmentType = AttachmentType.Image; break;
         case attachment.pollRenderer != undefined: attachmentType = AttachmentType.Poll; break;
@@ -78,10 +96,49 @@ export function extractPost(rawPost: Record<string, any>): CommunityPost {
         case attachment.playlistRenderer != undefined: attachmentType = AttachmentType.Playlist; break;
         default: attachmentType = "INVALID";
     }
+
     
     if (attachmentType === "INVALID") {
         throw new Error(`Could not resolve attachmentType in ${JSON.stringify(attachment)}! Please open an issue with this error!`);
     }
+
+
+    const content: {text: string, url?: string}[] | undefined = (() => {
+        const runMapper = (run: any) => {
+            const {text, navigationEndpoint} = run;
+            if (navigationEndpoint) {
+                const {commandMetadata} = navigationEndpoint;
+
+                let url: string;
+                const {url: parsedUrl} = commandMetadata.webCommandMetadata as {url: string};
+                const initialUrl = new URL(commandMetadata.webCommandMetadata.url, parsedUrl.startsWith("http") ? undefined : "https://youtube.com/");
+                // q parameter is the redirect target for /redirect links
+                if (initialUrl.searchParams.has("q")) {
+                    url = initialUrl.searchParams.get("q")!;
+                // if &q is not present, it's a YouTube-internal link.
+                } else {
+                    url = initialUrl.toString();
+                }
+
+                if (!url) throw new Error(`Could not find URL in ${JSON.stringify(navigationEndpoint)}! Please open an issue with this error message!`);
+
+                return {
+                    text,
+                    url 
+                }
+            }
+
+            return {text}
+        }
+        // this is a mess.
+        return (
+            contentText?.runs?.map(runMapper) ?? (contentText?.simpleText ? {text: contentText.simpleText} : undefined) ??
+            sharedPostContent?.runs?.map(runMapper) ?? (sharedPostContent?.simpleText ? {text: sharedPostContent.simpleText} : undefined)
+        );
+    })();
+
+    const post: BaseCommunityPost & Record<string, any> = {id, content, attachmentType};
+
 
     const images = (() => {
         if (attachmentType !== AttachmentType.Image) return;
@@ -107,7 +164,6 @@ export function extractPost(rawPost: Record<string, any>): CommunityPost {
         if (attachmentType !== AttachmentType.Poll) return;
         const {choices: rawChoices} = attachment.pollRenderer;
 
-        // TODO: proper YouTube typings for easier development because ytInitialData is a mess.
         return rawChoices.map((rawChoice: {text: Record<string, any>, image: Record<string, any>}): PollChoice => {
             const text = mergeRuns(rawChoice.text.runs);
             const choice: PollChoice = {text};
@@ -150,104 +206,24 @@ export function extractPost(rawPost: Record<string, any>): CommunityPost {
         }
     })();
 
-    const content: {text: string, url?: string}[] | undefined = text?.runs && text.runs.map(
-        (run: any) => {
-            const {text, navigationEndpoint} = run;
-            if (navigationEndpoint) {
-                const {commandMetadata} = navigationEndpoint;
-
-                let url: string;
-                const {url: parsedUrl} = commandMetadata.webCommandMetadata as {url: string};
-                const initialUrl = new URL(commandMetadata.webCommandMetadata.url, parsedUrl.startsWith("http") ? undefined : "https://youtube.com/");
-                // q parameter is the redirect target for /redirect links
-                if (initialUrl.searchParams.has("q")) {
-                    url = initialUrl.searchParams.get("q")!;
-                // if &q is not present, it's a YouTube-internal link.
-                } else {
-                    url = initialUrl.toString();
-                }
-
-                if (!url) throw new Error(`Could not find URL in ${JSON.stringify(navigationEndpoint)}! Please open an issue with this error message!`);
-
-                return {
-                    text,
-                    url 
-                }
-            }
-
-            return {text}
-        }
-    )
-
-	// YouTube Community posts do not reveal the actual post date so we need to approximate it from the friendly text they give us
-	let approximatePostDate = new Date()
-
-    const post: CommunityPost = {id, attachmentType, approximatePostDate};
-
-	let postDate = rawPost.publishedTimeText.runs[0].text.split(' ')
-
-	let postDateN = Number.parseInt(postDate[0])
-
-	//console.log(postDate)
-	//console.log(postDateN)
-
-	switch (postDate[1]) {
-		case 'second':
-		case 'seconds':
-			approximatePostDate = subSeconds(approximatePostDate, postDateN)
-			break
-		case 'minute':
-		case 'minutes':
-			approximatePostDate = subMinutes(approximatePostDate, postDateN)
-			break
-		case 'hour':
-		case 'hours':
-			approximatePostDate = subHours(approximatePostDate, postDateN)
-			break
-		case 'day':
-		case 'days':
-			approximatePostDate = subDays(approximatePostDate, postDateN)
-			break
-		case 'week':
-		case 'weeks':
-			approximatePostDate = subWeeks(approximatePostDate, postDateN)
-			break
-		case 'month':
-		case 'months':
-			approximatePostDate = subMonths(approximatePostDate, postDateN)
-			break
-		case 'year':
-		case 'years':
-			approximatePostDate = subYears(approximatePostDate, postDateN)
-			break
-		default:
-			break
-	}
     
     // avoid ugly {content: undefined}s
-    if (content) post.content = content;
-    if (images) post.images = images;
-    if (choices) post.choices = choices;
-    if (video) post.video = video;
-    if (playlist) post.playlist = playlist; 
-	if (approximatePostDate) post.approximatePostDate = approximatePostDate
+    if (post.attachmentType === AttachmentType.Image) post.images = images!;
+    else if (post.attachmentType === AttachmentType.Poll) post.choices = choices;
+    else if (post.attachmentType === AttachmentType.Video) post.video = video!;
+    else if (post.attachmentType === AttachmentType.Playlist) post.playlist = playlist!; 
+    else if (post.attachmentType === AttachmentType.SharedPost) post.sharedPost = extractPost(originalPost.backstagePostRenderer);
 
-    if (originalPost) post.sharedPost = extractPost(originalPost.backstagePostRenderer);
-
-    return post;
+    // this is really inelegant.
+    return post as unknown as CommunityPost;
 }
 
 /**
  * Extracts community posts from a YouTube page or already parsed ytInitialData.
- * @param source - either parsed `ytInitialData` via `parseRawData` or raw page string from a community tab or post.
+ * @param source either parsed `ytInitialData` via `parseRawData` or raw page string from a community tab or post.
  */
 export function extractCommunityPosts(source: ytInitialData): CommunityPost[]
 export function extractCommunityPosts(source: string): CommunityPost[]
 export function extractCommunityPosts(source: string | ytInitialData): CommunityPost[] {
-    const ytInitialData : ytInitialData = typeof source === "string" ? parseRawData({source, ytInitialData: true}).ytInitialData! : source;
-    if (!ytInitialData) throw new TypeError(`No YT initial data in provided source.`);
-    
-    // Slight optimization to skip unused tabs and meta tags.
-    const rawPosts = findValuesByKeys(findActiveTab(ytInitialData), communityPostKeys);
-    return rawPosts.map(post => extractPost(post));
+    return transformYtInitialData(source, communityPostKeys, extractPost);
 }

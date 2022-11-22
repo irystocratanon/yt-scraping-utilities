@@ -2,7 +2,8 @@ import type {
     ytInitialData, 
     ytInitialPlayerResponse, 
     YTInitialDataChannelTab,
-    Thumbnail
+    Thumbnail,
+    Run
 } from "./youtube-types";
 
 /**
@@ -15,18 +16,31 @@ export const initialDataRe = /(?<=var ytInitialData *\= *)\{.*?}(?=\;)(?<![A-z<>
 export const playerResponseRe = /(?<=var ytInitialPlayerResponse *\= *)\{.*?}(?=\;)(?<![A-z<>])/;
 
 
-interface ParseRawOptions {
+interface ParseRawOptions<D extends boolean, P extends boolean> {
+    /**
+     * the YouTube page body as string.
+     */
     source: string;
-    ytInitialData?: boolean;
-    ytInitialPlayerResponse?: boolean;
+    /**
+     * whether or not to parse and return ytInitialData. 
+     */
+    ytInitialData?: D;
+
+    /**
+     * whether or not to parse and return ytInitialPlayerResponse (only present on /watch and youtu.be pages).
+     */
+    ytInitialPlayerResponse?: P;
 }
+
+interface ParseRawReturn<D extends boolean, P extends boolean> {
+    ytInitialData?: D extends true ? ytInitialData : never;
+    ytInitialPlayerResponse?: P extends true ? ytInitialPlayerResponse : never;
+}
+
 /**
  * Extract raw full objects (`ytInitialData` and `ytInitialPlayerResponse`) from a YT page string.
- * @param options.source - the YouTube page body as string.
- * @param options.ytInitialData - whether or not to parse and return ytInitialData. 
- * @param options.ytInitialPlayerResponse - whether or not to parse and return ytInitialPlayerResponse (only present on /watch and youtu.be pages).
  */
-export function parseRawData(options: ParseRawOptions) {
+export function parseRawData<D extends boolean = false, P extends boolean = false>(options: ParseRawOptions<D, P>): ParseRawReturn<D, P> {
     const {
         source,
         ytInitialData: extractInitialData,
@@ -35,7 +49,7 @@ export function parseRawData(options: ParseRawOptions) {
     if (!source) throw new TypeError("No source string to search provided.");
     if (!extractInitialData && !extractPlayerResponse) throw new TypeError("At least one of ytInitialData and ytInitialPlayerResponse need to be parsed.");
 
-    const ret: {ytInitialData?: ytInitialData, ytInititalPlayerRespone?: ytInitialPlayerResponse} = {};
+    const ret: ParseRawReturn<D, P> = {};
     if (extractInitialData) {
         const match = initialDataRe.exec(source);
         match && (ret.ytInitialData = JSON.parse(match[0]));
@@ -43,7 +57,7 @@ export function parseRawData(options: ParseRawOptions) {
 
     if (extractPlayerResponse) {
         const match = playerResponseRe.exec(source);
-        match && (ret.ytInititalPlayerRespone = JSON.parse(match[0])); 
+        match && (ret.ytInitialPlayerResponse = JSON.parse(match[0])); 
     }
 
     return ret;
@@ -101,9 +115,9 @@ export const sanitizeUrl = (url: string, offset = 0): string => {
 }
 
 /**
- * Merges runs Arrays into a single text string.
+ * Merges {@linkcode Run} Arrays into a single text string.
  */
-export const mergeRuns = (runs: {text: string}[]) => runs.map(r => r.text).join("");
+export const mergeRuns = (runs: Run[]) => runs.map(r => r.text).join("");
 
 export const isValidDate = (date: Date) => !isNaN(date.getTime());
 export const tryParseDate = (timestamp: string) => {
@@ -113,3 +127,32 @@ export const tryParseDate = (timestamp: string) => {
 }
 
 export const getThumbnail = (thumbnails: Thumbnail[]): string => sanitizeUrl(getLastItem(thumbnails).url);
+
+export const getTextOrMergedRuns = (source: RequireOnlyOne<{runs: Run[], simpleText: string}, "runs" | "simpleText">) => 
+    source.simpleText ?? mergeRuns(source.runs);
+
+/**
+ * Utility function used to search ytInitialData for renderers, and transform those into more easily usable types.
+ */
+export function transformYtInitialData<T, U>(source: ytInitialData | string, searchKeys: string[], transformer: (sourceItem: U) => T): T[] {
+    if (typeof source !== "object") source = parseRawData({ytInitialData: true, source}).ytInitialData!;
+    const items: U[] = findValuesByKeys(source, searchKeys);
+    return items.map(transformer);
+}
+
+/**
+ * utility types taken from KPD's answer at https://stackoverflow.com/questions/40510611/typescript-interface-require-one-of-two-properties-to-exist
+ */
+export type RequireAtLeastOne<T, Keys extends keyof T = keyof T> =
+    Pick<T, Exclude<keyof T, Keys>> 
+    & {
+        [K in Keys]-?: Required<Pick<T, K>> & Partial<Pick<T, Exclude<Keys, K>>>
+    }[Keys];
+
+export type RequireOnlyOne<T, Keys extends keyof T = keyof T> =
+    Pick<T, Exclude<keyof T, Keys>>
+    & {
+        [K in Keys]-?:
+            Required<Pick<T, K>>
+            & Partial<Record<Exclude<Keys, K>, undefined>>
+    }[Keys];
